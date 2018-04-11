@@ -96,4 +96,4 @@ add_subdirectory(cxx)
 
 # install the script file
 webos_configure_source_files(PM-LOG files/scripts/pm-log-daemon-stop.sh)
-install(PROGRAMS ${PM-LOG} DESTINATION ${WEBOS_INSTALL_SBINDIR} ${LS2_PERMS})
+install(PROGRAMS ${PM-LOG} DESTINATION ${WEBOS_INSTALL_SBINDIR})
