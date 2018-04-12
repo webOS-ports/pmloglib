@@ -28,5 +28,5 @@ EnvironmentFile=-/var/systemd/system/env/pm-log-daemon.env
 ExecStartPre=-/bin/mkdir -p /tmp/pmlogdaemon
 ExecStart=/usr/sbin/PmLogDaemon -z -f 6 -m
 ExecStartPost=/bin/touch /tmp/pmlogdaemon/hub-ready
-ExecStop=/etc/systemd/system/scripts/pm-log-daemon-stop.sh
+ExecStop=/usr/sbin/pm-log-daemon-stop.sh
 Restart=on-failure
