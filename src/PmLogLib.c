@@ -994,12 +994,9 @@ static bool parse_json_file(const char *file_name)
             j_context = jarray_get(contexts_array, index);
             if (!jis_null(j_context)) {
 
-                raw_buffer    name;
-                raw_buffer    level;
+                raw_buffer    name = { NULL, 0 };
+                raw_buffer    level = { NULL, 0 };
                 char          err_msg[80];
-
-                name.m_str = NULL;
-                level.m_str = NULL;
 
                 ret = jobject_get_exists(j_context, j_cstr_to_buffer("name"), &value);
                 if (ret) { //found name
