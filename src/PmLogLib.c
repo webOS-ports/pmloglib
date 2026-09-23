@@ -120,20 +120,20 @@ pid_t gettid(void)
 static bool syslogConnected = false;
 static char progName[MAX_PROGRAM_NAME];
 
-void block_signals(sigset_t *old_set)
+static void block_signals(sigset_t *old_set)
 {
     sigset_t new_set;
     sigfillset(&new_set);
     pthread_sigmask(SIG_SETMASK, &new_set, old_set);
 }
 
-void unblock_signals(sigset_t *old_set)
+static void unblock_signals(sigset_t *old_set)
 {
     pthread_sigmask(SIG_SETMASK, old_set, NULL);
 }
 
 __attribute__((format(printf, 4, 5)))
-void CallSysLog(const char *context, const int level, const char* pidtid, const char* fmt, ...)
+static void CallSysLog(const char *context, const int level, const char* pidtid, const char* fmt, ...)
 {
     char buffer[1024] = {0,};
     va_list args;
@@ -269,7 +269,7 @@ static void PrintAppendToFile(const char* filePath, const char* fmt, ...)
  * Return a formatted string containing the process and thread ids
  * according to the context flags.
  ***********************************************************************/
-void GetPidStr(PmLogContext_ *context,char *ptidStr,long int ptidStrLen)
+static void GetPidStr(PmLogContext_ *context,char *ptidStr,long int ptidStrLen)
 {
     pid_t    pid;
     pid_t    tid;
@@ -788,7 +788,7 @@ static void PrvSetFlag(int* flagsP, int flagValue, bool set)
  * @param[in] set         Flag value to set or reset.
  * @return................Error code
  ***********************************************************************/
-PmLogErr PrvSetContextFlag(PmLogContext_ * contextP, int flag, bool set)
+static PmLogErr PrvSetContextFlag(PmLogContext_ * contextP, int flag, bool set)
 {
     if (contextP == NULL)
     {
