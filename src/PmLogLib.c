@@ -1693,7 +1693,11 @@ PmLogErr PmLogGetContext(const char* contextName, PmLogContext* pContext)
     // if context not found, add it
     if (theContextP == NULL)
     {
-        if (gGlobalsP->numUserContexts >= gGlobalsP->maxUserContexts)
+        // maxUserContexts comes out of shared memory, so don't trust it
+        // any further than the array it is supposed to describe
+        if ((gGlobalsP->numUserContexts < 0) ||
+            (gGlobalsP->numUserContexts >= gGlobalsP->maxUserContexts) ||
+            (gGlobalsP->numUserContexts >= PMLOG_MAX_NUM_CONTEXTS))
         {
             DbgPrint("no more contexts available, fallback to global context\n");
         }
