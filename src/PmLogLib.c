@@ -15,7 +15,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
-// get GNU extensions from dlfcn.h (dladdr)
+// get GNU extensions (e.g. O_* flags, syscall helpers)
 #define _GNU_SOURCE
 
 #include "PmLogLib.h"
@@ -23,7 +23,6 @@
 
 #include <assert.h>
 #include <ctype.h>
-#include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
 #include <fcntl.h>
@@ -32,7 +31,7 @@
 #include <string.h>
 #include <sys/syscall.h>
 #include <sys/syslog.h>
-#include <sys/shm.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -45,7 +44,12 @@
 extern const char*    __progname;
 static PmLogContext libProcessContext = kPmLogDefaultContext;
 
-// shared memory segment
+// POSIX shared memory object holding the globals, plus the lock file
+// guarding it.  Both live on /dev/shm - no System V IPC is involved, so
+// the kernel does not need CONFIG_SYSVIPC.
+#define PMLOG_SHM_NAME   "/pmloglib.shm"
+#define PMLOG_LOCK_PATH  "/dev/shm/pmloglib.lock"
+
 static int              lock_fd          = -1;
 
 // The file lock below keeps processes out of each other's way, but a
@@ -1155,16 +1159,11 @@ static const char kHexChars[16] =
 **********************************************************************/
 static void __attribute ((constructor)) init_function(void)
 {
-    const char* kPmLogLibSoFilePath = WEBOS_INSTALL_LIBDIR "/libPmLogLib.so";
-
-    key_t       key;
-    int         shmid;
-    char*       data;
+    int         shm_fd;
+    struct stat shmStat;
+    void*       data;
     size_t      shmSize;
     bool        needInit;
-    Dl_info     dlInfo;
-    int         result;
-    const char* libFilePath;
     mode_t      mode;
     PmLogContext_* theContextP = NULL;
 
@@ -1173,7 +1172,7 @@ static void __attribute ((constructor)) init_function(void)
     DbgPrint("Opening lock\n");
 
     mode = umask(0);
-    lock_fd = open("/dev/shm/pmloglib.lock", O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0666);
+    lock_fd = open(PMLOG_LOCK_PATH, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0666);
     umask(mode);
     if (lock_fd == -1)
     {
@@ -1181,59 +1180,59 @@ static void __attribute ((constructor)) init_function(void)
         return;
     }
 
-    // determine this library's file path dynamically
-    libFilePath = NULL;
-
-    memset(&dlInfo, 0, sizeof(dlInfo));
-    result = dladdr(init_function, &dlInfo);
-    if (result)
-    {
-        libFilePath = dlInfo.dli_fname;
-        DbgPrint("libFilePath: %s\n", libFilePath);
-    }
-    else
-    {
-        DbgPrint("dladdr err: %s\n", strerror(errno));
-    }
-
-    // if lookup failed for some reason, fall back to expected
-    if (libFilePath == NULL)
-    {
-        libFilePath = kPmLogLibSoFilePath;
-    }
-
-    DbgPrint("getting shm key\n");
-
-    key = ftok(libFilePath, 'A');
-    if (key == -1)
-    {
-        DbgPrint("ftok error: %s\n", strerror(errno));
-        return;
-    }
-
     // lock the globals
     PmLogPrvLock();
 
     shmSize = sizeof(PmLogGlobals);
-    DbgPrint("Getting shm size=%u\n", shmSize);
+    DbgPrint("Getting shm size=%zu\n", shmSize);
 
-    // if shm is guaranteed initialized to 0, we can use
-    // that to tell whether it needs initializing or not.
-    // Otherwise, we can do a shmget without the IPC_CREAT,
-    // and if returns errno == ENOENT we know it needs creation
-    // and initialization.
+    // The globals are kept in a POSIX shared memory object instead of a
+    // System V segment, so the kernel does not need CONFIG_SYSVIPC.  It
+    // lives on the same tmpfs as the lock file opened above, so this adds
+    // no requirement that wasn't there already.
 
-    shmid = shmget(key, shmSize, 0666 | IPC_CREAT);
-    if (shmid == -1)
+    mode = umask(0);
+    shm_fd = shm_open(PMLOG_SHM_NAME, O_CREAT | O_RDWR, 0666);
+    umask(mode);
+    if (shm_fd == -1)
     {
-        DbgPrint("shmget error: %s\n", strerror(errno));
+        DbgPrint("shm_open error: %s\n", strerror(errno));
+        PmLogPrvUnlock();
         return;
     }
 
-    data = (char*) shmat(shmid, NULL, 0 /* SHM_RDONLY */);
-    if (data == (char*) -1)
+    // A freshly created object has size 0 and is zero filled once grown,
+    // so the signature check below still tells us whether the contents
+    // need initializing.  Only grow it - another process may already have
+    // it mapped.
+    if (fstat(shm_fd, &shmStat) == -1)
     {
-        DbgPrint("shmat error: %s\n", strerror(errno));
+        DbgPrint("fstat error: %s\n", strerror(errno));
+        (void) close(shm_fd);
+        PmLogPrvUnlock();
+        return;
+    }
+
+    if ((size_t) shmStat.st_size < shmSize)
+    {
+        if (ftruncate(shm_fd, (off_t) shmSize) == -1)
+        {
+            DbgPrint("ftruncate error: %s\n", strerror(errno));
+            (void) close(shm_fd);
+            PmLogPrvUnlock();
+            return;
+        }
+    }
+
+    data = mmap(NULL, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+
+    // the mapping survives the descriptor being closed
+    (void) close(shm_fd);
+
+    if (data == MAP_FAILED)
+    {
+        DbgPrint("mmap error: %s\n", strerror(errno));
+        PmLogPrvUnlock();
         return;
     }
 

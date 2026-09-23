@@ -81,7 +81,7 @@ webos_add_linker_options(ALL --no-undefined)
 
 add_library(PmLogLib SHARED src/PmLogLib.c)
 
-target_link_libraries(PmLogLib ${GLIB2_LDFLAGS} ${PBNJSON_C_LDFLAGS} dl pthread)
+target_link_libraries(PmLogLib ${GLIB2_LDFLAGS} ${PBNJSON_C_LDFLAGS} rt pthread)
 
 webos_build_library(NOHEADERS)
 
