@@ -1176,7 +1176,7 @@ static void __attribute ((constructor)) init_function(void)
     umask(mode);
     if (lock_fd == -1)
     {
-        DbgPrint("open error: %s\n", strerror(errno));
+        DbgPrint("open error: %s\n", g_strerror(errno));
         return;
     }
 
@@ -1196,7 +1196,7 @@ static void __attribute ((constructor)) init_function(void)
     umask(mode);
     if (shm_fd == -1)
     {
-        DbgPrint("shm_open error: %s\n", strerror(errno));
+        DbgPrint("shm_open error: %s\n", g_strerror(errno));
         PmLogPrvUnlock();
         return;
     }
@@ -1207,7 +1207,7 @@ static void __attribute ((constructor)) init_function(void)
     // it mapped.
     if (fstat(shm_fd, &shmStat) == -1)
     {
-        DbgPrint("fstat error: %s\n", strerror(errno));
+        DbgPrint("fstat error: %s\n", g_strerror(errno));
         (void) close(shm_fd);
         PmLogPrvUnlock();
         return;
@@ -1217,7 +1217,7 @@ static void __attribute ((constructor)) init_function(void)
     {
         if (ftruncate(shm_fd, (off_t) shmSize) == -1)
         {
-            DbgPrint("ftruncate error: %s\n", strerror(errno));
+            DbgPrint("ftruncate error: %s\n", g_strerror(errno));
             (void) close(shm_fd);
             PmLogPrvUnlock();
             return;
@@ -1231,7 +1231,7 @@ static void __attribute ((constructor)) init_function(void)
 
     if (data == MAP_FAILED)
     {
-        DbgPrint("mmap error: %s\n", strerror(errno));
+        DbgPrint("mmap error: %s\n", g_strerror(errno));
         PmLogPrvUnlock();
         return;
     }
@@ -1304,7 +1304,7 @@ void PmLogPrvLock(void)
 
     if (lockf(lock_fd, F_LOCK, 0) == -1)
     {
-        DbgPrint("lock error: %s\n", strerror(errno));
+        DbgPrint("lock error: %s\n", g_strerror(errno));
     }
 }
 
@@ -1319,7 +1319,7 @@ void PmLogPrvUnlock(void)
 {
     if (lockf(lock_fd, F_ULOCK, 0) == -1)
     {
-        DbgPrint("unlock error: %s\n", strerror(errno));
+        DbgPrint("unlock error: %s\n", g_strerror(errno));
     }
 
     (void) pthread_mutex_unlock(&gProcessLock);
@@ -1963,7 +1963,7 @@ PmLogErr PmLogSetContextLevel(PmLogContext context, PmLogLevel level)
                 g_snprintf(debuglog, sizeof(debuglog), "PROCINFO:%s COMPONENT:%s ORIGINLEVEL:%d INPUTLEVEL:%d\n", procName, contextP->component, contextP->info.enabledLevel, level);
                 if (write(fd, debuglog, strlen(debuglog)) < 0)
                 {
-                    DbgPrint("write error: %s\n", strerror(errno));
+                    DbgPrint("write error: %s\n", g_strerror(errno));
                 }
             }
 
@@ -1972,7 +1972,7 @@ PmLogErr PmLogSetContextLevel(PmLogContext context, PmLogLevel level)
             fl.l_type = F_UNLCK;
             if(fcntl(fd, F_SETLKW, &fl)  == -1)
             {
-                DbgPrint("fcntl return error. code : %s\n", strerror(errno));
+                DbgPrint("fcntl return error. code : %s\n", g_strerror(errno));
             }
 
             close(fd);
@@ -2293,7 +2293,7 @@ PmLogErr PmLogString_(PmLogContext context, PmLogLevel level,
                    message ? message : "");
     if (ret < 0) {
         ErrPrint(contextP->component, ptidStr, "SNPRINTF_ERR {\"MSGID\":\"%s\",\"ERROR\":\"%s\"}",
-                 msgid, strerror(errno));
+                 msgid, g_strerror(errno));
         return kPmLogErr_FormatStringFailed;
     } else {
         if ((size_t) ret >= sizeof(lineStr)) {
@@ -2337,7 +2337,7 @@ static PmLogErr PrvLogVPrint(PmLogContext_* contextP, PmLogLevel level,
     if (n < 0)
     {
         // Deprecated function .....
-        //ErrPrint(ptidStr, "vsnprintf error %s\n", strerror(errno));
+        //ErrPrint(ptidStr, "vsnprintf error %s\n", g_strerror(errno));
         logErr = kPmLogErr_FormatStringFailed;
     }
     else
@@ -2554,7 +2554,7 @@ PmLogErr _PmLogMsgKV(PmLogContext context, PmLogLevel level, unsigned int flags,
     if (ret < 0) {
         ErrPrint(context_ptr->component, ptidStr, "VSNPRN_ERR {\"MSGID\":\"%s\",\"ERR_STR\":\"%s\"}",
                  msgid ? msgid : "NULL",
-                 strerror(errno));
+                 g_strerror(errno));
         return kPmLogErr_FormatStringFailed;
     } else if ((size_t) ret >= sizeof(final_str) - empty_kv_pair_size) {
         gchar *escaped_str = strtruncate_and_escape(ptr_final_str);
