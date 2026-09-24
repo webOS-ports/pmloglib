@@ -25,6 +25,7 @@
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -46,6 +47,12 @@ static PmLogContext libProcessContext = kPmLogDefaultContext;
 
 // shared memory segment
 static int              lock_fd          = -1;
+
+// The file lock below keeps processes out of each other's way, but a
+// POSIX record lock is owned by the process, not the thread: two threads
+// of one process both "take" it and both walk into the globals. This
+// mutex is what keeps them apart.
+static pthread_mutex_t  gProcessLock     = PTHREAD_MUTEX_INITIALIZER;
 static uint8_t          *gShmData        = NULL;
 
 // typed pointers to shared memory segment
@@ -1294,6 +1301,8 @@ PmLogGlobals* PmLogPrvGlobals(void)
 **********************************************************************/
 void PmLogPrvLock(void)
 {
+    (void) pthread_mutex_lock(&gProcessLock);
+
     if (lockf(lock_fd, F_LOCK, 0) == -1)
     {
         DbgPrint("lock error: %s\n", strerror(errno));
@@ -1313,6 +1322,8 @@ void PmLogPrvUnlock(void)
     {
         DbgPrint("unlock error: %s\n", strerror(errno));
     }
+
+    (void) pthread_mutex_unlock(&gProcessLock);
 }
 
 
