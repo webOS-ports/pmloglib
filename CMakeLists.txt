@@ -73,8 +73,8 @@ webos_add_compiler_flags(ALL ${PBNJSON_C_CFLAGS_OTHER})
 webos_build_pkgconfig(files/pkgconfig/PmLogLib)
 include_directories(include/public include/private)
 
-webos_add_compiler_flags(ALL C --std=c99)
-webos_add_compiler_flags(ALL -Wall)
+webos_add_compiler_flags(ALL C --std=gnu23)
+webos_add_compiler_flags(ALL -Wall -Wextra)
 
 webos_add_linker_options(ALL --version-script=${CMAKE_SOURCE_DIR}/src/PmLogLibExports.map)
 webos_add_linker_options(ALL --no-undefined)
