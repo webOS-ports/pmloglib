@@ -2545,7 +2545,7 @@ PmLogErr _PmLogMsgKV(PmLogContext context, PmLogLevel level, unsigned int flags,
                  msgid ? msgid : "NULL",
                  strerror(errno));
         return kPmLogErr_FormatStringFailed;
-    } else if ((size_t) ret >= sizeof(final_str)) {
+    } else if ((size_t) ret >= sizeof(final_str) - empty_kv_pair_size) {
         gchar *escaped_str = strtruncate_and_escape(ptr_final_str);
         WarnPrint(context_ptr->component, ptidStr,
                   "MSG_TRUNCATED {\"MSGID\":\"%s\",\"CAUSE\":\"Log message exceeded 1024 bytes\",\"TRUNCATED_MSG\":\"%s ...\"}",
