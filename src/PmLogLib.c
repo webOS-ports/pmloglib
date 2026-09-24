@@ -1949,7 +1949,10 @@ PmLogErr PmLogSetContextLevel(PmLogContext context, PmLogLevel level)
                 char debuglog[1024] ={0, };
                 GetCurrentProcessName(procName, sizeof(procName));
                 g_snprintf(debuglog, sizeof(debuglog), "PROCINFO:%s COMPONENT:%s ORIGINLEVEL:%d INPUTLEVEL:%d\n", procName, contextP->component, contextP->info.enabledLevel, level);
-                write(fd, debuglog, strlen(debuglog));
+                if (write(fd, debuglog, strlen(debuglog)) < 0)
+                {
+                    DbgPrint("write error: %s\n", strerror(errno));
+                }
             }
 
             /* release advisory file lock */
