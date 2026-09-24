@@ -93,3 +93,11 @@ webos_config_build_doxygen(doc Doxyfile)
 
 # Build PmLogCpp library
 add_subdirectory(cxx)
+
+# Test programs. Off by default so the normal build is untouched:
+#   cmake -D ENABLE_TESTS=ON <source dir> && make && ctest
+option(ENABLE_TESTS "Build the PmLogLib test programs" OFF)
+if(ENABLE_TESTS)
+	enable_testing()
+	add_subdirectory(tests)
+endif()
