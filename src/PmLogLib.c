@@ -1169,7 +1169,7 @@ static void __attribute ((constructor)) init_function(void)
     DbgPrint("Opening lock\n");
 
     mode = umask(0);
-        lock_fd = open("/dev/shm/pmloglib.lock", O_CREAT|O_RDWR , 0666);
+    lock_fd = open("/dev/shm/pmloglib.lock", O_CREAT | O_RDWR | O_CLOEXEC, 0666);
     umask(mode);
     if (lock_fd == -1)
     {
@@ -1733,7 +1733,7 @@ PmLogErr PmLogGetContext(const char* contextName, PmLogContext* pContext)
 
 static int GetCurrentProcessName(char *dst, int size)
 {
-    FILE* f = fopen("/proc/self/cmdline", "rt");
+    FILE* f = fopen("/proc/self/cmdline", "re");
     if (f) {
         int read = fread(dst, 1, size-1, f);
         dst[read] = 0;
@@ -1938,7 +1938,7 @@ PmLogErr PmLogSetContextLevel(PmLogContext context, PmLogLevel level)
     // write which process calls this function for debugging
     if(gGlobalsP->devMode)
     {
-        fd = open("/tmp/PmLogSetContextLevel.log", O_WRONLY | O_CREAT | O_NOCTTY |O_APPEND | O_NONBLOCK, 0644);
+        fd = open("/tmp/PmLogSetContextLevel.log", O_WRONLY | O_CREAT | O_NOCTTY | O_APPEND | O_NONBLOCK | O_CLOEXEC, 0644);
         if (fd >= 0)
         {
             /* get advisory file lock (write => exclusive lock) */
