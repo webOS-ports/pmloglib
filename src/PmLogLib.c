@@ -2145,10 +2145,10 @@ static bool validate_json_string(const char* kvpairs, PmLogErr *logErr, const bo
 
     const char *ptr_kvpairs = kvpairs;
     char json_str[BUFFER_LEN] = {0, };
-    int next_brace_pos = 0;
-    int previous_pos = 0;
-    char *search_str = NULL;
-    int move_index = 0;
+    size_t next_brace_pos = 0;
+    size_t previous_pos = 0;
+    const char *search_str = NULL;
+    size_t move_index = 0;
 
     if (with_tailing) {
         search_str = "} ";
@@ -2281,7 +2281,7 @@ PmLogErr PmLogString_(PmLogContext context, PmLogLevel level,
                  msgid, strerror(errno));
         return kPmLogErr_FormatStringFailed;
     } else {
-        if (ret >= sizeof(lineStr)) {
+        if ((size_t) ret >= sizeof(lineStr)) {
             DbgPrint("snprintf truncation\n");
         }
     }
@@ -2327,7 +2327,7 @@ static PmLogErr PrvLogVPrint(PmLogContext_* contextP, PmLogLevel level,
     }
     else
     {
-        if (n >= sizeof(lineStr))
+        if ((size_t) n >= sizeof(lineStr))
         {
             DbgPrint("vsnprintf truncation\n");
         }
@@ -2541,7 +2541,7 @@ PmLogErr _PmLogMsgKV(PmLogContext context, PmLogLevel level, unsigned int flags,
                  msgid ? msgid : "NULL",
                  strerror(errno));
         return kPmLogErr_FormatStringFailed;
-    } else if (ret >= sizeof(final_str)) {
+    } else if ((size_t) ret >= sizeof(final_str)) {
         gchar *escaped_str = strtruncate_and_escape(ptr_final_str);
         WarnPrint(context_ptr->component, ptidStr,
                   "MSG_TRUNCATED {\"MSGID\":\"%s\",\"CAUSE\":\"Log message exceeded 1024 bytes\",\"TRUNCATED_MSG\":\"%s ...\"}",
