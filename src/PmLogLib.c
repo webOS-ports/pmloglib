@@ -640,7 +640,7 @@ const int* PmLogStringToFacility(const char* facilityStr)
  * etc.
  * Return "?" if not recognized (should not occur).
  ***********************************************************************/
-static const char* PrvGetLevelStr(int level)
+[[maybe_unused]] static const char* PrvGetLevelStr(int level)
 {
     const char* s;
 
@@ -1931,9 +1931,6 @@ PmLogErr PmLogSetContextLevel(PmLogContext context, PmLogLevel level)
         return kPmLogErr_InvalidLevel;
     }
 
-    // dummy reference to avoid unused function warning
-    // when DbgPrint is compiled out
-    (void) &PrvGetLevelStr;
     DbgPrint("SetContextLevel %s => %s\n", contextP->component,
         PrvGetLevelStr(level));
 
@@ -2651,9 +2648,9 @@ PmLogErr PmLogVPrint_(PmLogContext context, PmLogLevel level,
 static PmLogErr DumpData_OffsetHexAscii(PmLogContext_* contextP,
     PmLogLevel level, const void* dataP, size_t dataSize)
 {
-    const size_t kMaxBytesPerLine = 16;
+    constexpr size_t kMaxBytesPerLine = 16;
 
-    const size_t kMaxLineLen = 8 + 2 + kMaxBytesPerLine * 3 + 2 +
+    constexpr size_t kMaxLineLen = 8 + 2 + kMaxBytesPerLine * 3 + 2 +
         1 + kMaxBytesPerLine + 1;
 
     const uint8_t*    srcP;
