@@ -138,7 +138,7 @@ static void CallSysLog(const char *context, const int level, const char* pidtid,
     char buffer[1024] = {0,};
     va_list args;
     int index = snprintf(buffer, sizeof(buffer), "%s %s %s ", pidtid, PMLOG_IDENTIFIER, context);
-    if(index < 0)
+    if ((index < 0) || ((size_t) index >= sizeof(buffer)))
     {
         return;
     }
