@@ -15,7 +15,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
-// get GNU extensions from dlfcn.h (dladdr)
+// get GNU extensions (e.g. O_* flags, syscall helpers)
 #define _GNU_SOURCE
 
 #include "PmLogLib.h"
@@ -23,15 +23,15 @@
 
 #include <assert.h>
 #include <ctype.h>
-#include <dlfcn.h>
 #include <errno.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/syscall.h>
 #include <sys/syslog.h>
-#include <sys/shm.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -44,8 +44,19 @@
 extern const char*    __progname;
 static PmLogContext libProcessContext = kPmLogDefaultContext;
 
-// shared memory segment
+// POSIX shared memory object holding the globals, plus the lock file
+// guarding it.  Both live on /dev/shm - no System V IPC is involved, so
+// the kernel does not need CONFIG_SYSVIPC.
+#define PMLOG_SHM_NAME   "/pmloglib.shm"
+#define PMLOG_LOCK_PATH  "/dev/shm/pmloglib.lock"
+
 static int              lock_fd          = -1;
+
+// The file lock below keeps processes out of each other's way, but a
+// POSIX record lock is owned by the process, not the thread: two threads
+// of one process both "take" it and both walk into the globals. This
+// mutex is what keeps them apart.
+static pthread_mutex_t  gProcessLock     = PTHREAD_MUTEX_INITIALIZER;
 static uint8_t          *gShmData        = NULL;
 
 // typed pointers to shared memory segment
@@ -120,24 +131,25 @@ pid_t gettid(void)
 static bool syslogConnected = false;
 static char progName[MAX_PROGRAM_NAME];
 
-void block_signals(sigset_t *old_set)
+static void block_signals(sigset_t *old_set)
 {
     sigset_t new_set;
     sigfillset(&new_set);
     pthread_sigmask(SIG_SETMASK, &new_set, old_set);
 }
 
-void unblock_signals(sigset_t *old_set)
+static void unblock_signals(sigset_t *old_set)
 {
     pthread_sigmask(SIG_SETMASK, old_set, NULL);
 }
 
-void CallSysLog(const char *context, const int level, const char* pidtid, const char* fmt, ...)
+__attribute__((format(printf, 4, 5)))
+static void CallSysLog(const char *context, const int level, const char* pidtid, const char* fmt, ...)
 {
     char buffer[1024] = {0,};
     va_list args;
     int index = snprintf(buffer, sizeof(buffer), "%s %s %s ", pidtid, PMLOG_IDENTIFIER, context);
-    if(index < 0)
+    if ((index < 0) || ((size_t) index >= sizeof(buffer)))
     {
         return;
     }
@@ -268,7 +280,7 @@ static void PrintAppendToFile(const char* filePath, const char* fmt, ...)
  * Return a formatted string containing the process and thread ids
  * according to the context flags.
  ***********************************************************************/
-void GetPidStr(PmLogContext_ *context,char *ptidStr,long int ptidStrLen)
+static void GetPidStr(PmLogContext_ *context,char *ptidStr,long int ptidStrLen)
 {
     pid_t    pid;
     pid_t    tid;
@@ -387,7 +399,7 @@ static void mystrcpy(char* dst, size_t dstSize, const char* src)
         srcLen = dstSize - 1;
     }
 
-    strncpy(dst, src, srcLen); // memcpy to strcpy due to coverity
+    memcpy(dst, src, srcLen);
     dst[ srcLen ] = 0;
 }
 
@@ -399,8 +411,8 @@ static void mystrcpy(char* dst, size_t dstSize, const char* src)
  ***********************************************************************/
 static inline gchar *strtruncate_and_escape(const char* source)
 {
-    char buffer[TRUNCATED_MSG_SIZE] = {0};
-    strncpy(buffer, source, TRUNCATED_MSG_SIZE - 1);
+    char buffer[TRUNCATED_MSG_SIZE];
+    g_strlcpy(buffer, source, sizeof(buffer));
     return g_strescape(buffer, NULL);
 }
 
@@ -640,7 +652,7 @@ const int* PmLogStringToFacility(const char* facilityStr)
  * etc.
  * Return "?" if not recognized (should not occur).
  ***********************************************************************/
-static const char* PrvGetLevelStr(int level)
+[[maybe_unused]] static const char* PrvGetLevelStr(int level)
 {
     const char* s;
 
@@ -787,7 +799,7 @@ static void PrvSetFlag(int* flagsP, int flagValue, bool set)
  * @param[in] set         Flag value to set or reset.
  * @return................Error code
  ***********************************************************************/
-PmLogErr PrvSetContextFlag(PmLogContext_ * contextP, int flag, bool set)
+static PmLogErr PrvSetContextFlag(PmLogContext_ * contextP, int flag, bool set)
 {
     if (contextP == NULL)
     {
@@ -904,7 +916,7 @@ static bool parse_config_overrides(jvalue_ref j_overrides, const gchar *file_nam
             level_str = jstring_get(j_value);
             valid_level = PrvParseConfigLevel(level_str.m_str, &level);
             if (!valid_level) {
-                ErrPrint(COMPONENT_PREFIX, "[]", "PARSE_ERROR {\"file\":\"%s\",\"index\":%zu} Invalid log level \"%s\" (ignoring)",
+                ErrPrint(COMPONENT_PREFIX, "[]", "PARSE_ERROR {\"file\":\"%s\",\"index\":%zd} Invalid log level \"%s\" (ignoring)",
                          file_name, i, level_str.m_str);
             }
         } else { // global overrides
@@ -993,12 +1005,9 @@ static bool parse_json_file(const char *file_name)
             j_context = jarray_get(contexts_array, index);
             if (!jis_null(j_context)) {
 
-                raw_buffer    name;
-                raw_buffer    level;
+                raw_buffer    name = { NULL, 0 };
+                raw_buffer    level = { NULL, 0 };
                 char          err_msg[80];
-
-                name.m_str = NULL;
-                level.m_str = NULL;
 
                 ret = jobject_get_exists(j_context, j_cstr_to_buffer("name"), &value);
                 if (ret) { //found name
@@ -1150,16 +1159,11 @@ static const char kHexChars[16] =
 **********************************************************************/
 static void __attribute ((constructor)) init_function(void)
 {
-    const char* kPmLogLibSoFilePath = WEBOS_INSTALL_LIBDIR "/libPmLogLib.so";
-
-    key_t       key;
-    int         shmid;
-    char*       data;
+    int         shm_fd;
+    struct stat shmStat;
+    void*       data;
     size_t      shmSize;
     bool        needInit;
-    Dl_info     dlInfo;
-    int         result;
-    const char* libFilePath;
     mode_t      mode;
     PmLogContext_* theContextP = NULL;
 
@@ -1168,41 +1172,11 @@ static void __attribute ((constructor)) init_function(void)
     DbgPrint("Opening lock\n");
 
     mode = umask(0);
-        lock_fd = open("/dev/shm/pmloglib.lock", O_CREAT|O_RDWR , 0666);
+    lock_fd = open(PMLOG_LOCK_PATH, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0666);
     umask(mode);
     if (lock_fd == -1)
     {
-        DbgPrint("open error: %s\n", strerror(errno));
-        return;
-    }
-
-    // determine this library's file path dynamically
-    libFilePath = NULL;
-
-    memset(&dlInfo, 0, sizeof(dlInfo));
-    result = dladdr(init_function, &dlInfo);
-    if (result)
-    {
-        libFilePath = dlInfo.dli_fname;
-        DbgPrint("libFilePath: %s\n", libFilePath);
-    }
-    else
-    {
-        DbgPrint("dladdr err: %s\n", strerror(errno));
-    }
-
-    // if lookup failed for some reason, fall back to expected
-    if (libFilePath == NULL)
-    {
-        libFilePath = kPmLogLibSoFilePath;
-    }
-
-    DbgPrint("getting shm key\n");
-
-    key = ftok(libFilePath, 'A');
-    if (key == -1)
-    {
-        DbgPrint("ftok error: %s\n", strerror(errno));
+        DbgPrint("open error: %s\n", g_strerror(errno));
         return;
     }
 
@@ -1210,25 +1184,55 @@ static void __attribute ((constructor)) init_function(void)
     PmLogPrvLock();
 
     shmSize = sizeof(PmLogGlobals);
-    DbgPrint("Getting shm size=%u\n", shmSize);
+    DbgPrint("Getting shm size=%zu\n", shmSize);
 
-    // if shm is guaranteed initialized to 0, we can use
-    // that to tell whether it needs initializing or not.
-    // Otherwise, we can do a shmget without the IPC_CREAT,
-    // and if returns errno == ENOENT we know it needs creation
-    // and initialization.
+    // The globals are kept in a POSIX shared memory object instead of a
+    // System V segment, so the kernel does not need CONFIG_SYSVIPC.  It
+    // lives on the same tmpfs as the lock file opened above, so this adds
+    // no requirement that wasn't there already.
 
-    shmid = shmget(key, shmSize, 0666 | IPC_CREAT);
-    if (shmid == -1)
+    mode = umask(0);
+    shm_fd = shm_open(PMLOG_SHM_NAME, O_CREAT | O_RDWR, 0666);
+    umask(mode);
+    if (shm_fd == -1)
     {
-        DbgPrint("shmget error: %s\n", strerror(errno));
+        DbgPrint("shm_open error: %s\n", g_strerror(errno));
+        PmLogPrvUnlock();
         return;
     }
 
-    data = (char*) shmat(shmid, NULL, 0 /* SHM_RDONLY */);
-    if (data == (char*) -1)
+    // A freshly created object has size 0 and is zero filled once grown,
+    // so the signature check below still tells us whether the contents
+    // need initializing.  Only grow it - another process may already have
+    // it mapped.
+    if (fstat(shm_fd, &shmStat) == -1)
     {
-        DbgPrint("shmat error: %s\n", strerror(errno));
+        DbgPrint("fstat error: %s\n", g_strerror(errno));
+        (void) close(shm_fd);
+        PmLogPrvUnlock();
+        return;
+    }
+
+    if ((size_t) shmStat.st_size < shmSize)
+    {
+        if (ftruncate(shm_fd, (off_t) shmSize) == -1)
+        {
+            DbgPrint("ftruncate error: %s\n", g_strerror(errno));
+            (void) close(shm_fd);
+            PmLogPrvUnlock();
+            return;
+        }
+    }
+
+    data = mmap(NULL, shmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+
+    // the mapping survives the descriptor being closed
+    (void) close(shm_fd);
+
+    if (data == MAP_FAILED)
+    {
+        DbgPrint("mmap error: %s\n", g_strerror(errno));
+        PmLogPrvUnlock();
         return;
     }
 
@@ -1296,9 +1300,11 @@ PmLogGlobals* PmLogPrvGlobals(void)
 **********************************************************************/
 void PmLogPrvLock(void)
 {
+    (void) pthread_mutex_lock(&gProcessLock);
+
     if (lockf(lock_fd, F_LOCK, 0) == -1)
     {
-        DbgPrint("lock error: %s\n", strerror(errno));
+        DbgPrint("lock error: %s\n", g_strerror(errno));
     }
 }
 
@@ -1313,8 +1319,10 @@ void PmLogPrvUnlock(void)
 {
     if (lockf(lock_fd, F_ULOCK, 0) == -1)
     {
-        DbgPrint("unlock error: %s\n", strerror(errno));
+        DbgPrint("unlock error: %s\n", g_strerror(errno));
     }
+
+    (void) pthread_mutex_unlock(&gProcessLock);
 }
 
 
@@ -1695,7 +1703,11 @@ PmLogErr PmLogGetContext(const char* contextName, PmLogContext* pContext)
     // if context not found, add it
     if (theContextP == NULL)
     {
-        if (gGlobalsP->numUserContexts >= gGlobalsP->maxUserContexts)
+        // maxUserContexts comes out of shared memory, so don't trust it
+        // any further than the array it is supposed to describe
+        if ((gGlobalsP->numUserContexts < 0) ||
+            (gGlobalsP->numUserContexts >= gGlobalsP->maxUserContexts) ||
+            (gGlobalsP->numUserContexts >= PMLOG_MAX_NUM_CONTEXTS))
         {
             DbgPrint("no more contexts available, fallback to global context\n");
         }
@@ -1732,7 +1744,7 @@ PmLogErr PmLogGetContext(const char* contextName, PmLogContext* pContext)
 
 static int GetCurrentProcessName(char *dst, int size)
 {
-    FILE* f = fopen("/proc/self/cmdline", "rt");
+    FILE* f = fopen("/proc/self/cmdline", "re");
     if (f) {
         int read = fread(dst, 1, size-1, f);
         dst[read] = 0;
@@ -1931,16 +1943,13 @@ PmLogErr PmLogSetContextLevel(PmLogContext context, PmLogLevel level)
         return kPmLogErr_InvalidLevel;
     }
 
-    // dummy reference to avoid unused function warning
-    // when DbgPrint is compiled out
-    (void) &PrvGetLevelStr;
     DbgPrint("SetContextLevel %s => %s\n", contextP->component,
         PrvGetLevelStr(level));
 
     // write which process calls this function for debugging
     if(gGlobalsP->devMode)
     {
-        fd = open("/tmp/PmLogSetContextLevel.log", O_WRONLY | O_CREAT | O_NOCTTY |O_APPEND | O_NONBLOCK, 0644);
+        fd = open("/tmp/PmLogSetContextLevel.log", O_WRONLY | O_CREAT | O_NOCTTY | O_APPEND | O_NONBLOCK | O_CLOEXEC, 0644);
         if (fd >= 0)
         {
             /* get advisory file lock (write => exclusive lock) */
@@ -1952,7 +1961,10 @@ PmLogErr PmLogSetContextLevel(PmLogContext context, PmLogLevel level)
                 char debuglog[1024] ={0, };
                 GetCurrentProcessName(procName, sizeof(procName));
                 g_snprintf(debuglog, sizeof(debuglog), "PROCINFO:%s COMPONENT:%s ORIGINLEVEL:%d INPUTLEVEL:%d\n", procName, contextP->component, contextP->info.enabledLevel, level);
-                write(fd, debuglog, strlen(debuglog));
+                if (write(fd, debuglog, strlen(debuglog)) < 0)
+                {
+                    DbgPrint("write error: %s\n", g_strerror(errno));
+                }
             }
 
             /* release advisory file lock */
@@ -1960,7 +1972,7 @@ PmLogErr PmLogSetContextLevel(PmLogContext context, PmLogLevel level)
             fl.l_type = F_UNLCK;
             if(fcntl(fd, F_SETLKW, &fl)  == -1)
             {
-                DbgPrint("fcntl return error. code : %s\n", strerror(errno));
+                DbgPrint("fcntl return error. code : %s\n", g_strerror(errno));
             }
 
             close(fd);
@@ -2148,10 +2160,10 @@ static bool validate_json_string(const char* kvpairs, PmLogErr *logErr, const bo
 
     const char *ptr_kvpairs = kvpairs;
     char json_str[BUFFER_LEN] = {0, };
-    int next_brace_pos = 0;
-    int previous_pos = 0;
-    char *search_str = NULL;
-    int move_index = 0;
+    size_t next_brace_pos = 0;
+    size_t previous_pos = 0;
+    const char *search_str = NULL;
+    size_t move_index = 0;
 
     if (with_tailing) {
         search_str = "} ";
@@ -2281,10 +2293,10 @@ PmLogErr PmLogString_(PmLogContext context, PmLogLevel level,
                    message ? message : "");
     if (ret < 0) {
         ErrPrint(contextP->component, ptidStr, "SNPRINTF_ERR {\"MSGID\":\"%s\",\"ERROR\":\"%s\"}",
-                 msgid, strerror(errno));
+                 msgid, g_strerror(errno));
         return kPmLogErr_FormatStringFailed;
     } else {
-        if (ret >= sizeof(lineStr)) {
+        if ((size_t) ret >= sizeof(lineStr)) {
             DbgPrint("snprintf truncation\n");
         }
     }
@@ -2325,12 +2337,12 @@ static PmLogErr PrvLogVPrint(PmLogContext_* contextP, PmLogLevel level,
     if (n < 0)
     {
         // Deprecated function .....
-        //ErrPrint(ptidStr, "vsnprintf error %s\n", strerror(errno));
+        //ErrPrint(ptidStr, "vsnprintf error %s\n", g_strerror(errno));
         logErr = kPmLogErr_FormatStringFailed;
     }
     else
     {
-        if (n >= sizeof(lineStr))
+        if ((size_t) n >= sizeof(lineStr))
         {
             DbgPrint("vsnprintf truncation\n");
         }
@@ -2542,9 +2554,9 @@ PmLogErr _PmLogMsgKV(PmLogContext context, PmLogLevel level, unsigned int flags,
     if (ret < 0) {
         ErrPrint(context_ptr->component, ptidStr, "VSNPRN_ERR {\"MSGID\":\"%s\",\"ERR_STR\":\"%s\"}",
                  msgid ? msgid : "NULL",
-                 strerror(errno));
+                 g_strerror(errno));
         return kPmLogErr_FormatStringFailed;
-    } else if (ret >= sizeof(final_str)) {
+    } else if ((size_t) ret >= sizeof(final_str) - empty_kv_pair_size) {
         gchar *escaped_str = strtruncate_and_escape(ptr_final_str);
         WarnPrint(context_ptr->component, ptidStr,
                   "MSG_TRUNCATED {\"MSGID\":\"%s\",\"CAUSE\":\"Log message exceeded 1024 bytes\",\"TRUNCATED_MSG\":\"%s ...\"}",
@@ -2651,9 +2663,9 @@ PmLogErr PmLogVPrint_(PmLogContext context, PmLogLevel level,
 static PmLogErr DumpData_OffsetHexAscii(PmLogContext_* contextP,
     PmLogLevel level, const void* dataP, size_t dataSize)
 {
-    const size_t kMaxBytesPerLine = 16;
+    constexpr size_t kMaxBytesPerLine = 16;
 
-    const size_t kMaxLineLen = 8 + 2 + kMaxBytesPerLine * 3 + 2 +
+    constexpr size_t kMaxLineLen = 8 + 2 + kMaxBytesPerLine * 3 + 2 +
         1 + kMaxBytesPerLine + 1;
 
     const uint8_t*    srcP;

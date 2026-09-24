@@ -43,7 +43,7 @@ endif()
 # To enable this option run "cmake -D BUILD_PRIVATE=ON"
 if(BUILD_PRIVATE)
 	webos_build_pkgconfig(files/pkgconfig/PmLogLib-private)
-	install(DIRECTORY "include/private/" DESTINATION @WEBOS_INSTALL_INCLUDEDIR@ FILES_MATCHING PATTERN "*.h" PATTERN ".*" EXCLUDE)
+	install(DIRECTORY "include/private/" DESTINATION ${WEBOS_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.h" PATTERN ".*" EXCLUDE)
 	return()
 endif()
 
@@ -54,7 +54,7 @@ endif()
 if(NOT BUILD_WITHOUT_HEADERS)
 	webos_build_pkgconfig(files/pkgconfig/PmLogLib-headers)
 	webos_configure_header_files(include/public INSTALL)
-	install(DIRECTORY "include/public/" DESTINATION @WEBOS_INSTALL_INCLUDEDIR@ FILES_MATCHING PATTERN "*.h" PATTERN ".*" EXCLUDE)
+	install(DIRECTORY "include/public/" DESTINATION ${WEBOS_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.h" PATTERN ".*" EXCLUDE)
 	if(SHIP_HEADERS_ONLY)
 		return()
 	endif()
@@ -73,15 +73,15 @@ webos_add_compiler_flags(ALL ${PBNJSON_C_CFLAGS_OTHER})
 webos_build_pkgconfig(files/pkgconfig/PmLogLib)
 include_directories(include/public include/private)
 
-webos_add_compiler_flags(ALL C --std=c99)
-webos_add_compiler_flags(ALL -Wall)
+webos_add_compiler_flags(ALL C --std=gnu23)
+webos_add_compiler_flags(ALL -Wall -Wextra)
 
 webos_add_linker_options(ALL --version-script=${CMAKE_SOURCE_DIR}/src/PmLogLibExports.map)
 webos_add_linker_options(ALL --no-undefined)
 
 add_library(PmLogLib SHARED src/PmLogLib.c)
 
-target_link_libraries(PmLogLib ${GLIB2_LDFLAGS} ${PBNJSON_C_LDFLAGS} dl pthread)
+target_link_libraries(PmLogLib ${GLIB2_LDFLAGS} ${PBNJSON_C_LDFLAGS} rt pthread)
 
 webos_build_library(NOHEADERS)
 
@@ -93,3 +93,11 @@ webos_config_build_doxygen(doc Doxyfile)
 
 # Build PmLogCpp library
 add_subdirectory(cxx)
+
+# Test programs. Off by default so the normal build is untouched:
+#   cmake -D ENABLE_TESTS=ON <source dir> && make && ctest
+option(ENABLE_TESTS "Build the PmLogLib test programs" OFF)
+if(ENABLE_TESTS)
+	enable_testing()
+	add_subdirectory(tests)
+endif()
