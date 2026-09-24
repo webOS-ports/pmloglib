@@ -1169,7 +1169,7 @@ static void __attribute ((constructor)) init_function(void)
     DbgPrint("Opening lock\n");
 
     mode = umask(0);
-    lock_fd = open("/dev/shm/pmloglib.lock", O_CREAT | O_RDWR | O_CLOEXEC, 0666);
+    lock_fd = open("/dev/shm/pmloglib.lock", O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0666);
     umask(mode);
     if (lock_fd == -1)
     {
