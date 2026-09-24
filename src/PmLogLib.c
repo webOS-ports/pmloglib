@@ -132,6 +132,7 @@ void unblock_signals(sigset_t *old_set)
     pthread_sigmask(SIG_SETMASK, old_set, NULL);
 }
 
+__attribute__((format(printf, 4, 5)))
 void CallSysLog(const char *context, const int level, const char* pidtid, const char* fmt, ...)
 {
     char buffer[1024] = {0,};
@@ -904,7 +905,7 @@ static bool parse_config_overrides(jvalue_ref j_overrides, const gchar *file_nam
             level_str = jstring_get(j_value);
             valid_level = PrvParseConfigLevel(level_str.m_str, &level);
             if (!valid_level) {
-                ErrPrint(COMPONENT_PREFIX, "[]", "PARSE_ERROR {\"file\":\"%s\",\"index\":%zu} Invalid log level \"%s\" (ignoring)",
+                ErrPrint(COMPONENT_PREFIX, "[]", "PARSE_ERROR {\"file\":\"%s\",\"index\":%zd} Invalid log level \"%s\" (ignoring)",
                          file_name, i, level_str.m_str);
             }
         } else { // global overrides
