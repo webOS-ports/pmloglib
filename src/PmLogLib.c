@@ -387,7 +387,7 @@ static void mystrcpy(char* dst, size_t dstSize, const char* src)
         srcLen = dstSize - 1;
     }
 
-    strncpy(dst, src, srcLen); // memcpy to strcpy due to coverity
+    memcpy(dst, src, srcLen);
     dst[ srcLen ] = 0;
 }
 
@@ -399,8 +399,8 @@ static void mystrcpy(char* dst, size_t dstSize, const char* src)
  ***********************************************************************/
 static inline gchar *strtruncate_and_escape(const char* source)
 {
-    char buffer[TRUNCATED_MSG_SIZE] = {0};
-    strncpy(buffer, source, TRUNCATED_MSG_SIZE - 1);
+    char buffer[TRUNCATED_MSG_SIZE];
+    g_strlcpy(buffer, source, sizeof(buffer));
     return g_strescape(buffer, NULL);
 }
 
